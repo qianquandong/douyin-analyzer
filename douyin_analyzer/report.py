@@ -2,7 +2,10 @@ import os
 from datetime import datetime
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XlImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from PIL import Image as PILImage
 
 from .utils import format_timestamp
 
@@ -115,6 +118,19 @@ def _find_analysis_for_scene(
     return None
 
 
+def _make_thumbnail(src_path: str, output_dir: str, max_h: int = 120) -> str:
+    """生成缩略图用于嵌入Excel。返回缩略图路径。"""
+    thumb_dir = os.path.join(output_dir, "frames", ".thumbs")
+    os.makedirs(thumb_dir, exist_ok=True)
+    thumb_path = os.path.join(thumb_dir, os.path.basename(src_path))
+    img = PILImage.open(src_path)
+    ratio = max_h / img.height
+    new_size = (int(img.width * ratio), max_h)
+    img = img.resize(new_size, PILImage.LANCZOS)
+    img.save(thumb_path, "JPEG", quality=80)
+    return thumb_path
+
+
 def generate_excel(
     video_info: dict,
     url: str,
@@ -123,9 +139,13 @@ def generate_excel(
     analyses: list[dict] | None,
     output_dir: str,
 ) -> str:
-    """生成Excel分析报告。返回文件路径。"""
+    """生成Excel分析报告（含嵌入图片）。返回文件路径。"""
     xlsx_path = os.path.join(output_dir, "report.xlsx")
     wb = Workbook()
+
+    IMG_COL = 6        # F列放图片
+    IMG_HEIGHT = 120    # 缩略图高度(px)
+    ROW_HEIGHT_PTS = 100  # 行高(pt)
 
     # ── Sheet 1: 视频分析 ──
     ws = wb.active
@@ -133,7 +153,7 @@ def generate_excel(
 
     headers = [
         "场景编号", "开始时间", "结束时间", "时长(秒)",
-        "帧数", "帧文件名", "转录文本", "画面描述(中文)", "AI提示词(英文)",
+        "帧数", "关键帧", "转录文本", "画面描述(中文)", "AI提示词(英文)",
     ]
     h_fill = PatternFill("solid", fgColor="1F4E79")
     h_font = Font(bold=True, color="FFFFFF", name="Arial", size=11)
@@ -147,7 +167,7 @@ def generate_excel(
     alt_fill = PatternFill("solid", fgColor="F2F7FB")
     body_font = Font(name="Arial", size=10)
     wrap = Alignment(vertical="top", wrap_text=True)
-    center = Alignment(horizontal="center", vertical="top")
+    center = Alignment(horizontal="center", vertical="center")
 
     for col, h in enumerate(headers, 1):
         c = ws.cell(row=1, column=col, value=h)
@@ -159,7 +179,6 @@ def generate_excel(
         start_t = format_timestamp(scene["start"])
         end_t = format_timestamp(scene["end"])
         dur = round(scene["end"] - scene["start"], 1)
-        frame_names = ", ".join(os.path.basename(p) for p in scene["frame_paths"])
 
         # 转录文本
         trans = ""
@@ -179,7 +198,7 @@ def generate_excel(
 
         data = [
             scene["scene_num"], start_t, end_t, dur,
-            len(scene["frame_paths"]), frame_names,
+            len(scene["frame_paths"]), "",  # F列留空放图片
             trans, " | ".join(descs), " | ".join(prompts),
         ]
         for col, val in enumerate(data, 1):
@@ -187,11 +206,19 @@ def generate_excel(
             c.font, c.border, c.fill = body_font, border, fill
             c.alignment = center if col <= 5 else wrap
 
+        # 嵌入关键帧图片到 F 列
+        ws.row_dimensions[row].height = ROW_HEIGHT_PTS
+        for j, fp in enumerate(scene["frame_paths"]):
+            if os.path.exists(fp):
+                thumb = _make_thumbnail(fp, output_dir, max_h=IMG_HEIGHT)
+                img = XlImage(thumb)
+                cell_ref = f"{get_column_letter(IMG_COL)}{row}"
+                ws.add_image(img, cell_ref)
+
     widths = {"A": 10, "B": 10, "C": 10, "D": 10, "E": 8,
-              "F": 30, "G": 35, "H": 50, "I": 60}
+              "F": 40, "G": 35, "H": 50, "I": 60}
     for col_letter, w in widths.items():
         ws.column_dimensions[col_letter].width = w
-    ws.auto_filter.ref = f"A1:I{len(scenes) + 1}"
     ws.freeze_panes = "A2"
 
     # ── Sheet 2: 概览 ──
