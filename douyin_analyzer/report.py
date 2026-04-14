@@ -143,7 +143,8 @@ def generate_excel(
     xlsx_path = os.path.join(output_dir, "report.xlsx")
     wb = Workbook()
 
-    IMG_COL = 6        # F列放图片
+    IMG_COL_1 = 6      # F列放第1帧
+    IMG_COL_2 = 7      # G列放第2帧（双帧场景）
     IMG_HEIGHT = 120    # 缩略图高度(px)
     ROW_HEIGHT_PTS = 100  # 行高(pt)
 
@@ -153,7 +154,7 @@ def generate_excel(
 
     headers = [
         "场景编号", "开始时间", "结束时间", "时长(秒)",
-        "帧数", "关键帧", "转录文本", "画面描述(中文)", "AI提示词(英文)",
+        "帧数", "关键帧1", "关键帧2", "转录文本", "画面描述(中文)", "AI提示词(英文)",
     ]
     h_fill = PatternFill("solid", fgColor="1F4E79")
     h_font = Font(bold=True, color="FFFFFF", name="Arial", size=11)
@@ -198,7 +199,8 @@ def generate_excel(
 
         data = [
             scene["scene_num"], start_t, end_t, dur,
-            len(scene["frame_paths"]), "",  # F列留空放图片
+            len(scene["frame_paths"]),
+            "", "",  # F、G列留空放图片
             trans, " | ".join(descs), " | ".join(prompts),
         ]
         for col, val in enumerate(data, 1):
@@ -206,17 +208,18 @@ def generate_excel(
             c.font, c.border, c.fill = body_font, border, fill
             c.alignment = center if col <= 5 else wrap
 
-        # 嵌入关键帧图片到 F 列
+        # 嵌入关键帧图片：第1帧到F列，第2帧到G列
         ws.row_dimensions[row].height = ROW_HEIGHT_PTS
-        for j, fp in enumerate(scene["frame_paths"]):
+        for j, fp in enumerate(scene["frame_paths"][:2]):
             if os.path.exists(fp):
                 thumb = _make_thumbnail(fp, output_dir, max_h=IMG_HEIGHT)
                 img = XlImage(thumb)
-                cell_ref = f"{get_column_letter(IMG_COL)}{row}"
+                col = IMG_COL_1 if j == 0 else IMG_COL_2
+                cell_ref = f"{get_column_letter(col)}{row}"
                 ws.add_image(img, cell_ref)
 
     widths = {"A": 10, "B": 10, "C": 10, "D": 10, "E": 8,
-              "F": 40, "G": 35, "H": 50, "I": 60}
+              "F": 28, "G": 28, "H": 35, "I": 50, "J": 60}
     for col_letter, w in widths.items():
         ws.column_dimensions[col_letter].width = w
     ws.freeze_panes = "A2"
