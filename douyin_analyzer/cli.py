@@ -5,9 +5,14 @@ import click
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from .config import ANTHROPIC_API_KEY, DEFAULT_OUTPUT_DIR, WHISPER_MODEL
+from .config import (
+    ANTHROPIC_API_KEY,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_STYLE_TEMPLATE,
+    WHISPER_MODEL,
+)
 from .downloader import download_video
-from .image_analyzer import analyze_frame, create_client
+from .image_analyzer import analyze_all_frames, create_client
 from .report import generate_excel, generate_report
 from .scene_detect import detect_scenes
 from .transcriber import extract_audio, transcribe_audio
@@ -38,7 +43,12 @@ console = Console()
     type=click.Choice(["chrome", "firefox", "edge", "safari"]),
     help="从哪个浏览器读取抖音cookies",
 )
-def analyze(url, output, whisper_model, scene_threshold, skip_transcription, skip_analysis, cookies_from):
+@click.option(
+    "--style-template",
+    default=DEFAULT_STYLE_TEMPLATE,
+    help="第二步生成最终AI提示词时的统一风格模板（中文）",
+)
+def analyze(url, output, whisper_model, scene_threshold, skip_transcription, skip_analysis, cookies_from, style_template):
     """分析抖音视频：下载 → 关键帧检测 → 语音转文字 → AI提示词生成
 
     URL: 抖音视频链接（支持短链接和完整链接）
@@ -99,24 +109,39 @@ def analyze(url, output, whisper_model, scene_threshold, skip_transcription, ski
             else:
                 console.print("  未检测到语音内容\n")
 
-        # Step 4: AI分析关键帧
+        # Step 4: AI分析关键帧（两步流程）
         analyses = None
         if not skip_analysis:
             client = create_client(ANTHROPIC_API_KEY)
-            analyses = []
-            all_frames = [fp for s in scenes for fp in s["frame_paths"]]
-            for i, fp in enumerate(all_frames, 1):
-                task = progress.add_task(
-                    f"正在分析帧 {i}/{len(all_frames)}...", total=None
-                )
-                result = analyze_frame(client, fp)
-                result["frame_path"] = fp
-                analyses.append(result)
-                progress.update(
-                    task, description=f"[green]帧 {i} 分析完成[/green]"
-                )
-                progress.remove_task(task)
-            console.print()
+            # 准备 frame + duration 列表
+            frame_items = []
+            for s in scenes:
+                dur = s["end"] - s["start"]
+                for fp in s["frame_paths"]:
+                    frame_items.append({"frame_path": fp, "duration": dur})
+            n_total = len(frame_items)
+
+            task = progress.add_task(
+                f"第一步：生成画面描述词 0/{n_total}...", total=None
+            )
+
+            def _cb(i, n, stage):
+                if stage == "stage1":
+                    progress.update(
+                        task, description=f"第一步：生成画面描述词 {i}/{n}..."
+                    )
+                elif stage == "stage2":
+                    progress.update(
+                        task,
+                        description="第二步：统一风格生成最终AI提示词...",
+                    )
+
+            analyses = analyze_all_frames(
+                client, frame_items, style_template, progress_callback=_cb
+            )
+            progress.update(task, description="[green]AI分析完成[/green]")
+            progress.remove_task(task)
+            console.print(f"  风格模板: {style_template[:50]}...\n")
 
         # Step 5: 生成报告
         task = progress.add_task("正在生成报告...", total=None)
