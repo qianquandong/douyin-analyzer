@@ -78,8 +78,8 @@ def generate_report(
                     if len(frame_paths) > 1:
                         fname = os.path.basename(fp)
                         lines.append(f"#### {fname}\n")
-                    lines.append(f"**画面描述**: {analysis['description']}\n")
-                    lines.append("**通用提示词**:")
+                    lines.append(f"**画面描述词**: {analysis['description']}\n")
+                    lines.append("**AI提示词（中文）**:")
                     lines.append(f"> {analysis['prompt']}\n")
 
         lines.append("---\n")
@@ -154,7 +154,8 @@ def generate_excel(
 
     headers = [
         "场景编号", "开始时间", "结束时间", "时长(秒)",
-        "帧数", "关键帧1", "关键帧2", "转录文本", "画面描述(中文)", "AI提示词(英文)",
+        "帧数", "关键帧1", "关键帧2", "转录文本",
+        "画面描述词(中文)", "AI提示词(中文)",
     ]
     h_fill = PatternFill("solid", fgColor="1F4E79")
     h_font = Font(bold=True, color="FFFFFF", name="Arial", size=11)
